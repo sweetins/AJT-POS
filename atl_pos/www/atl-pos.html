@@ -1,0 +1,27 @@
+{% extends "templates/web.html" %}
+
+{% block title %}ATL POS{% endblock %}
+
+{% block navbar %}{% endblock %}
+{% block footer %}{% endblock %}
+{% block footer_extension %}{% endblock %}
+
+{% block head_include %}
+<style>
+  body { margin: 0; background: #faf7f1; }
+  .main-section, .page_content, .container { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  #navbar, .navbar, footer, .web-footer { display: none !important; }
+  #atl-pos-wrap { min-height: 100vh; }
+</style>
+{% endblock %}
+
+{% block page_content %}
+<div id="atl-pos-wrap">
+  <div id="atl-pos-root">
+    <div style="padding:40px;text-align:center;color:#15855c;font-family:Inter,system-ui,sans-serif">
+      Loading the floor…
+    </div>
+  </div>
+</div>
+<script src="/assets/atl_pos/js/atl_pos.js"></script>
+{% endblock %}
