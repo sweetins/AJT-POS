@@ -36,6 +36,7 @@ frappe.ready(function () {
   .apos-strip{display:flex;gap:14px;margin-left:auto;font-size:11.5px;
     white-space:nowrap}
   .apos-strip b{color:${GREEN};font-size:14px}
+  #atl-strip>div{text-align:center;line-height:1.35}
   .apos-chip{background:${GREEN};color:#fff;border:none;border-radius:18px;
     padding:7px 14px;font-weight:700;cursor:pointer;font-size:12px;
     white-space:nowrap}
@@ -115,7 +116,8 @@ frappe.ready(function () {
   .ovl{position:absolute;inset:0;background:rgba(18,51,31,.45);display:flex;
     align-items:center;justify-content:center;z-index:60;padding:10px}
   .card{background:#fff;border-radius:16px;width:min(560px,96%);max-height:96%;
-    display:flex;flex-direction:column;overflow:auto}
+    display:flex;flex-direction:column;overflow:auto;
+    border:2px solid ${GREEN};box-shadow:0 14px 44px rgba(18,51,31,.38)}
   .card .ch{display:flex;align-items:center;justify-content:space-between;
     padding:11px 16px;background:${GREEN};color:#fff;font-weight:800;
     flex:0 0 auto}
@@ -133,6 +135,8 @@ frappe.ready(function () {
   .qcash{display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
   .qcash button{border:1.5px solid ${GREEN};background:#fff;color:${GREEN};
     border-radius:9px;padding:8px 12px;font-weight:800;cursor:pointer}
+  .tctl{display:flex;justify-content:center;margin:2px 0}
+  .locked{background:#eef5f0;color:#6b7b71;cursor:not-allowed}
   .chg{text-align:center;font-size:14px}
   .chg b{color:${AMBER};font-size:21px}
   .msg{padding:8px 16px;font-size:12.5px;font-weight:700}
@@ -158,8 +162,10 @@ frappe.ready(function () {
     border-radius:18px;padding:7px 14px;font-weight:800;font-size:12px;
     cursor:pointer}
   .chipbtn.on{background:${GREEN};color:#fff}
-  .mbody{display:flex;align-items:stretch}
-  .mitems{flex:1;padding:10px;display:grid;gap:8px;align-content:start;
+  .mpage{height:100%;display:flex;flex-direction:column}
+  .mbody{flex:1 1 auto;min-height:0;display:flex;align-items:stretch}
+  .mitems{flex:1;min-width:0;padding:10px;display:grid;gap:8px;
+    align-content:start;overflow:auto;
     grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
   .mi{border:1px solid #e6dfd1;border-radius:10px;padding:9px;cursor:pointer;
     font-size:12.5px;background:${CREAM}}
@@ -169,7 +175,7 @@ frappe.ready(function () {
   .thumb-ph{display:flex;align-items:center;justify-content:center;
     color:${GREEN};font-size:20px}
   .mpend{width:236px;border-left:1px solid #efe8da;display:flex;
-    flex-direction:column;background:#fff}
+    flex-direction:column;background:#fff;min-height:0}
   .prow{font-size:12px;padding:6px 8px;border-bottom:1px dashed #efe8da}
   .prow .st{display:flex;gap:6px;align-items:center;margin-top:3px}
   .prow .st button{width:24px;height:24px;border-radius:6px;
@@ -203,6 +209,28 @@ frappe.ready(function () {
   };
   const initials = n => (n || "??").split(/\s+/).map(x => x[0]).join("")
     .slice(0, 2).toUpperCase();
+  const humanMins = m => m >= 60
+    ? Math.floor(m / 60) + "h" + String(m % 60).padStart(2, "0") + "m"
+    : m + "m";
+  let LASTX = 0, LASTY = 0, TT = null, TTtimer = null;
+  function hideTip() {
+    if (TTtimer) { clearTimeout(TTtimer); TTtimer = null; }
+    if (TT) { TT.remove(); TT = null; }
+  }
+  function posTip() {
+    if (!TT) return;
+    TT.style.left = Math.min(LASTX + 14,
+      window.innerWidth - TT.offsetWidth - 8) + "px";
+    TT.style.top = (LASTY + 14) + "px";
+  }
+  function showTip(html) {
+    hideTip();
+    TT = document.createElement("div");
+    TT.className = "atooltip";
+    TT.innerHTML = html;
+    document.body.appendChild(TT);
+    posTip();
+  }
 
   async function refresh() {
     const [st, sg] = await Promise.all([
@@ -243,44 +271,49 @@ frappe.ready(function () {
     if (row.restaurant_room === "In-Room Dining") return "Room Service";
     return row.restaurant_room;
   }
-  const printUrl = n =>
-    `/printview?doctype=POS%20Invoice&name=${encodeURIComponent(n)}` +
-    `&format=ATL%20Thermal%20Receipt&no_letterhead=1`;
+  // Downloadable PDF (works before a printer is set up). Opening the URL
+  // streams a PDF the cashier can save or print from the browser.
+  const pdfUrl = (n, fmt) =>
+    `/api/method/frappe.utils.print_format.download_pdf?doctype=POS%20Invoice` +
+    `&name=${encodeURIComponent(n)}` +
+    `&format=${encodeURIComponent(fmt || "ATL Thermal Receipt")}` +
+    `&no_letterhead=1`;
 
   /* ═══ shell ═══ */
   function render() {
+    hideTip();
     const shift = STATS.my_shift;
     const me = STATS.me || {};
     root.innerHTML = `<style>${css}</style>
     <div class="apos">
-      <div class="apos-top">
+      <div class="apos-top" id="atl-top">
         <img src="/files/atl_logo.png" onerror="this.style.display='none'">
-        <div><div class="apos-brand">AGYEIWAA'S TABLE · POS</div>
+        <div><div class="apos-brand" id="atl-brand">AGYEIWAA'S TABLE · POS</div>
           <div style="font-size:10px;color:#8a8272;font-style:italic">
             there's always a seat for you</div></div>
-        <div class="apos-strip">
-          <div>Today<br><b>${fmt(STATS.today_revenue)}</b></div>
-          <div>Open bills<br><b>${STATS.open_bills ?? "–"}</b></div>
-          <div>Folio<br><b>${fmt(STATS.folio_balance)}</b></div>
-          ${shift ? `<div>Float<br><b>${fmt(shift.cash_float)}</b></div>` : ""}
+        <div class="apos-strip" id="atl-strip">
+          <div id="atl-strip-today">Today<br><b id="atl-strip-today-val">${fmt(STATS.today_revenue)}</b></div>
+          <div id="atl-strip-openbills">Open bills<br><b id="atl-strip-openbills-val">${STATS.open_bills ?? "–"}</b></div>
+          <div id="atl-strip-folio">Folio<br><b id="atl-strip-folio-val">${fmt(STATS.folio_balance)}</b></div>
+          ${shift ? `<div id="atl-strip-float">Float<br><b id="atl-strip-float-val">${fmt(shift.cash_float)}</b></div>` : ""}
         </div>
         ${shift
-          ? `<button class="apos-chip ghost">Shift Opened @ ${tfmt(shift.period_start_date)}</button>`
+          ? `<button class="apos-chip ghost" id="atl-shift-chip">Shift Opened @ ${tfmt(shift.period_start_date)}</button>`
           : `<button class="apos-chip" id="openShift">OPEN SHIFT</button>`}
-        <button class="apos-chip ghost" id="rf">Reload</button>
+        <button class="apos-chip ghost" id="rf" title="Refresh the floor">Reload</button>
         <div class="avatar" id="ava" title="${esc(me.full_name || "")}">
           ${me.image ? `<img src="${esc(me.image)}">` : initials(me.full_name)}
         </div>
       </div>
       <div class="apos-main" id="main"></div>
-      <div class="apos-foot">
-        <div class="fnav">
+      <div class="apos-foot" id="atl-foot">
+        <div class="fnav" id="atl-nav">
           ${[["tables", "▦", "Table"], ["menu", "▤", "Menu"],
              ["cart", "🧾", "Cart"]].map(([p, ic, lb]) =>
-            `<button class="${PAGE === p ? "on" : ""}" data-pg="${p}">
+            `<button id="atl-nav-${p}" class="${PAGE === p ? "on" : ""}" data-pg="${p}">
                <span class="ic">${ic}</span>${lb}</button>`).join("")}
         </div>
-        <div class="credit">Designed by System Manager @ ATL · 0542820156</div>
+        <div class="credit" id="atl-credit">Designed by System Manager @ ATL · 0542820156</div>
       </div>
     </div>`;
     const os = root.querySelector("#openShift");
@@ -323,6 +356,9 @@ frappe.ready(function () {
   function drawMain() {
     const m = root.querySelector("#main");
     m.innerHTML = `<div id="pg"></div><div id="ovl"></div>`;
+    const pg = root.querySelector("#pg");
+    if (PAGE === "menu") { m.style.overflow = "hidden"; pg.style.height = "100%"; }
+    else { m.style.overflow = "auto"; pg.style.height = ""; }
     if (PAGE === "tables") drawTables();
     else if (PAGE === "menu") drawMenuPage();
     else drawCart();
@@ -333,7 +369,7 @@ frappe.ready(function () {
     const pg = root.querySelector("#pg");
     pg.innerHTML = `
       <div class="apos-tabs">${ROOMS.map(r =>
-        `<div class="apos-tab ${r === ROOM ? "on" : ""}" data-room="${r}">${r}</div>`)
+        `<div id="atl-room-${r.replace(/\s+/g, "-")}" class="apos-tab ${r === ROOM ? "on" : ""}" data-room="${r}">${r}</div>`)
         .join("")}</div>
       <div class="tbody">
         <div class="apos-grid" id="grid"></div>
@@ -355,23 +391,29 @@ frappe.ready(function () {
 
   function attachTip(el, b) {
     if (!b || !b.summary) return;
-    el.onmouseenter = ev => {
-      const t = document.createElement("div");
-      t.className = "atooltip";
-      t.innerHTML = `<b>${esc(b.name)}</b>${b.custom_guest_name ?
-        " · " + esc(b.custom_guest_name) : ""}<br>${esc(b.summary)}`;
-      document.body.appendChild(t); el._tt = t;
-      const mv = e2 => {
-        t.style.left = Math.min(e2.clientX + 14,
-          window.innerWidth - t.offsetWidth - 8) + "px";
-        t.style.top = (e2.clientY + 12) + "px";
-      };
-      mv(ev); el.onmousemove = mv;
-    };
-    el.onmouseleave = () => { if (el._tt) el._tt.remove(); el._tt = null; };
+    const html = `<b>${esc(b.name)}</b>${b.custom_guest_name ?
+      " · " + esc(b.custom_guest_name) : ""}<br>${esc(b.summary)}`;
+    // hover: wait ~0.5s so merely crossing a card does not flash a tooltip
+    el.addEventListener("mouseenter", () => {
+      hideTip();
+      TTtimer = setTimeout(() => showTip(html), 500);
+    });
+    el.addEventListener("mousemove", posTip);
+    el.addEventListener("mouseleave", hideTip);
+    // touch: press-and-hold acts as hover; any lift or move dismisses
+    let touchT = null;
+    const clr = () => { if (touchT) { clearTimeout(touchT); touchT = null; } };
+    el.addEventListener("touchstart", ev => {
+      const t = ev.touches[0]; LASTX = t.clientX; LASTY = t.clientY;
+      touchT = setTimeout(() => showTip(html), 450);
+    }, { passive: true });
+    el.addEventListener("touchend", () => { clr(); hideTip(); });
+    el.addEventListener("touchmove", () => { clr(); hideTip(); });
+    el.addEventListener("touchcancel", () => { clr(); hideTip(); });
   }
 
   function drawGrid() {
+    hideTip();
     const g = root.querySelector("#grid");
     if (ROOM === "Room Service") {
       const occ = Object.entries(STATE.bills || {})
@@ -382,7 +424,7 @@ frappe.ready(function () {
         <input id="grno" inputmode="numeric" placeholder="e.g. 120">
         <button class="apos-chip" id="grgo">Open</button>
         <div style="margin-top:16px;text-align:left">${occ.map(([t, bs]) =>
-          bs.map(b => `<div class="tcard occ" data-bill="${b.name}"
+          bs.map(b => `<div id="atl-bill-${b.name}" class="tcard occ" data-bill="${b.name}"
             style="margin-bottom:8px"><div class="tn">${t}</div>
             <div class="amt">${fmt(b.grand_total || b.total)}</div>
             ${b.custom_raybow_room ?
@@ -408,19 +450,19 @@ frappe.ready(function () {
     g.innerHTML = tablesForRoom().map(t => {
       const bs = (STATE.bills || {})[t.name] || [];
       if (!bs.length)
-        return `<div class="tcard" data-new="${t.name}">
+        return `<div id="atl-tcard-${t.name}" class="tcard" data-new="${t.name}">
           <div class="tn">${t.name}</div>
           <div class="seat">a seat for you</div></div>`;
       return bs.map(b => {
         const m = minsSince(b.last_kot);
-        return `<div class="tcard occ" data-bill="${b.name}">
+        return `<div id="atl-bill-${b.name}" class="tcard occ" data-bill="${b.name}">
           <div class="tn">${t.name}</div>
           <div class="amt">${fmt(b.grand_total || b.total)}</div>
           <div class="w">${esc(b.waiter || "")}</div>
           ${b.custom_raybow_room ?
             `<div class="tag">⌂ ${esc(b.custom_raybow_room)}</div>` : ""}
           ${m !== null ?
-            `<div class="mins ${m > 20 ? "hot" : ""}">${m}m</div>` : ""}
+            `<div class="mins ${m > 20 ? "hot" : ""}">${humanMins(m)}</div>` : ""}
         </div>`;
       }).join("");
     }).join("");
@@ -465,8 +507,8 @@ frappe.ready(function () {
           esc(SEL.custom_guest_name) + " ✎" : "+ guest name"}</a></div></div>
       <div class="apos-items">${items.map(i => {
         const v = VOIDS[i.name];
-        return `<div class="irow">
-        <input type="checkbox" data-ck="${esc(i.name)}">
+        return `<div id="atl-irow-${esc(i.name)}" class="irow">
+        <input id="atl-ck-${esc(i.name)}" type="checkbox" data-ck="${esc(i.name)}">
         <div class="q">${Number(i.qty)}×</div>
         <div class="nm">${esc(i.item_name)}
           ${i.description && i.description !== i.item_name ?
@@ -476,7 +518,7 @@ frappe.ready(function () {
             : "VOID approved · tap ✕"}</span>` : ""}
         </div>
         <div>${(Number(i.amount) || 0).toFixed(2)}</div>
-        <button class="vx" data-vx="${esc(i.name)}" title="Void item">✕</button>
+        <button id="atl-vx-${esc(i.name)}" class="vx" data-vx="${esc(i.name)}" title="Void item">✕</button>
         </div>`; }).join("")}</div>
       <div class="apos-total"><span>TOTAL</span><span>${fmt(total)}</span></div>
       <div class="apos-acts">
@@ -510,7 +552,7 @@ frappe.ready(function () {
     p.querySelector("#addMore").onclick = () => {
       PENDING = []; PAGE = "menu"; render(); };
     p.querySelector("#preRc").onclick = () =>
-      window.open(printUrl(SEL.name), "_blank");
+      window.open(pdfUrl(SEL.name), "_blank");
     p.querySelector("#xfer").onclick = transferOverlay;
     p.querySelector("#chg").onclick = chargeOverlay;
     p.querySelector("#tender").onclick = () => tenderOverlay(total, charged);
@@ -538,7 +580,7 @@ frappe.ready(function () {
       return;
     }
     const ov = root.querySelector("#ovl");
-    ov.innerHTML = `<div class="ovl"><div class="card" style="width:420px">
+    ov.innerHTML = `<div class="ovl"><div class="card" id="atl-card-void" style="width:420px">
       <div class="ch"><span>Void · ${esc(item.item_name)}</span>
         <button id="x">×</button></div>
       <div class="tform">
@@ -597,7 +639,8 @@ frappe.ready(function () {
             .filter(Boolean).join(" / ");
       const pcount = PENDING.reduce((s, x) => s + x.qty, 0);
       pg.innerHTML = `
-      <div class="mhead">
+      <div class="mpage">
+      <div class="mhead" id="atl-mhead">
         <b style="color:${GREEN};font-size:13px;white-space:nowrap">
           ${isNew ? "New · " + esc(SEL.new_table)
                   : "Add to " + esc(SEL.restaurant_table)}</b>
@@ -610,17 +653,17 @@ frappe.ready(function () {
         <button id="ph" class="abtn" style="padding:8px 12px;
           ${PHOTOS ? `background:${GREEN};color:#fff` : ""}">📷</button>
       </div>
-      <div class="crumbs">
+      <div class="crumbs" id="atl-crumbs">
         ${(main || sub || q) ? `<button class="abtn" id="up"
            style="padding:6px 12px">‹ Back</button>` : ""}
         <span style="font-size:11.5px;color:#8a8272;font-weight:700">${crumb}</span>
-        ${chips.map(c => `<button class="chipbtn ${(sub || main) === c ? "on" : ""}"
+        ${chips.map(c => `<button id="atl-cat-${esc(c).replace(/[^A-Za-z0-9]+/g, "-")}" class="chipbtn ${(sub || main) === c ? "on" : ""}"
           data-c="${esc(c)}">${label(c)}</button>`).join("")}
       </div>
-      <div class="mbody">
-        <div class="mitems" style="grid-template-columns:repeat(auto-fill,
+      <div class="mbody" id="atl-mbody">
+        <div class="mitems" id="atl-mitems" style="grid-template-columns:repeat(auto-fill,
           minmax(${PHOTOS ? "140px" : "160px"},1fr))">
-          ${items.map(i => `<div class="mi" data-i="${esc(i.item)}">
+          ${items.map(i => `<div id="atl-mi-${esc(i.item)}" class="mi" data-i="${esc(i.item)}">
             ${PHOTOS ? (i.image ?
               `<img class="thumb" src="${esc(i.image)}" loading="lazy">` :
               `<div class="thumb thumb-ph">🍽</div>`) : ""}
@@ -629,7 +672,7 @@ frappe.ready(function () {
         </div>
         <div class="mpend">
           <div style="flex:1;overflow:auto">${PENDING.map((pn, ix) =>
-            `<div class="prow"><b>${esc(pn.item_name)}</b>
+            `<div id="atl-prow-${ix}" class="prow"><b>${esc(pn.item_name)}</b>
               <div style="display:flex;justify-content:space-between;
                 font-size:11px;color:#5d6b61;margin-top:2px">
                 <span>@ ${Number(pn.rate).toFixed(2)}</span>
@@ -656,6 +699,7 @@ frappe.ready(function () {
             <button class="abtn solid wide" id="fire" style="width:100%">
               SEND${pcount ? " · " + pcount + " item(s)" : ""}</button></div>
         </div>
+      </div>
       </div>`;
       const s = pg.querySelector("#ms");
       s.oninput = () => {
@@ -744,7 +788,7 @@ frappe.ready(function () {
         font-size:14px">Active tables · all rooms (${all.length})</div>
       ${all.map(([t, b]) => {
         const m = minsSince(b.last_kot);
-        return `<div class="cartrow" data-bill="${b.name}">
+        return `<div id="atl-cart-${b.name}" class="cartrow" data-bill="${b.name}">
         <div><b>${t}</b>
           <span style="font-size:11px;color:#8a8272">· ${esc(b.waiter || "")}
           ${b.custom_guest_name ? "· " + esc(b.custom_guest_name) : ""}
@@ -754,7 +798,7 @@ frappe.ready(function () {
         <div style="text-align:right">
           <b style="color:${GREEN}">${fmt(b.grand_total || b.total)}</b>
           ${m !== null ? `<div style="font-size:10.5px;
-            color:${m > 20 ? AMBER : "#8a8272"}">${m}m ago</div>` : ""}
+            color:${m > 20 ? AMBER : "#8a8272"}">${humanMins(m)} ago</div>` : ""}
         </div></div>`;
       }).join("") ||
       `<div class="center-note">No active tables. there's always a seat
@@ -772,7 +816,7 @@ frappe.ready(function () {
     for (const bs of Object.values(STATE.bills || {}))
       for (const b of bs) if (b.name !== SEL.name) others.push(b);
     const ov = root.querySelector("#ovl");
-    ov.innerHTML = `<div class="ovl"><div class="card" style="width:400px">
+    ov.innerHTML = `<div class="ovl"><div class="card" id="atl-card-move" style="width:400px">
       <div class="ch"><span>${rows.length === totalRows ?
         "Combine whole bill into" : "Move " + rows.length + " item(s) to"}</span>
         <button id="x">×</button></div>
@@ -803,33 +847,39 @@ frappe.ready(function () {
 
   function tenderOverlay(total, charged) {
     const ov = root.querySelector("#ovl");
-    let lines = [{ mode: charged ? "Raybow Folio" : "Cash", amount: total }];
-    const modes = ["Cash", "Mobile Money", "Credit Card"]
-      .concat(charged ? ["Raybow Folio"] : []);
+    // When the bill is charged to a Raybow room the tender is locked to the
+    // folio for the exact amount: no method change, no amount edit, no split.
+    let lines = charged
+      ? [{ mode: "Raybow Folio", amount: total }]
+      : [{ mode: "Cash", amount: total }];
+    const modes = ["Cash", "Mobile Money", "Credit Card"];
     const draw = () => {
       const paid = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
       const change = paid - total;
-      ov.innerHTML = `<div class="ovl"><div class="card" style="width:430px">
+      ov.innerHTML = `<div class="ovl"><div class="card" id="atl-card-tender" style="width:430px">
         <div class="ch"><span>Tender · ${esc(SEL.restaurant_table)}</span>
           <button id="x">×</button></div>
         <div class="tform">
           <div class="big">${fmt(total)}</div>
+          ${charged ? `<div style="text-align:center;font-size:12px;color:#7c8a80">
+            Charged to Raybow Room ${esc(SEL.custom_raybow_room || "")} ·
+            settles to the guest folio</div>` : ""}
           ${lines.map((l, ix) => `<div class="trow">
-            <select data-s="${ix}">${modes.map(m =>
-              `<option ${m === l.mode ? "selected" : ""}>${m}</option>`)
-              .join("")}</select>
-            <input data-a="${ix}" type="number" step="0.01" value="${l.amount}">
-            ${lines.length > 1 ? `<button class="abtn" data-x="${ix}"
+            <select id="atl-tender-mode-${ix}" data-s="${ix}" ${charged ? "disabled class='locked'" : ""}>
+              ${(charged ? ["Raybow Folio"] : modes).map(m =>
+                `<option ${m === l.mode ? "selected" : ""}>${m}</option>`)
+                .join("")}</select>
+            <input id="atl-tender-amt-${ix}" data-a="${ix}" type="number"
+              step="0.01" value="${l.amount}" ${charged ? "disabled class='locked'" : ""}>
+            ${(!charged && lines.length > 1) ? `<button class="abtn" data-x="${ix}"
               style="padding:8px 12px">−</button>` : ""}
           </div>`).join("")}
-          <div style="display:flex;justify-content:space-between;
-            align-items:center;flex-wrap:wrap;gap:6px">
+          ${charged ? "" : `<div class="tctl">
             <button class="abtn" id="addLine" style="padding:8px 14px">
-              + split tender</button>
-            <div class="qcash">${[10, 20, 50, 100, 200].map(v =>
-              `<button data-q="${v}">${v}</button>`).join("")}
-              <button data-q="exact">exact</button></div>
-          </div>
+              + split tender</button></div>
+          <div class="qcash" id="atl-qcash">${[10, 20, 50, 100, 200].map(v =>
+            `<button id="atl-qc-${v}" data-q="${v}">${v}</button>`).join("")}
+            <button id="atl-qc-exact" data-q="exact">exact</button></div>`}
           <div class="chg">${change >= 0 ?
             `Change <b>${fmt(change)}</b>` :
             `<span style="color:#b3392f">Short by ${fmt(-change)}</span>`}</div>
@@ -839,23 +889,25 @@ frappe.ready(function () {
           <div class="msg err" id="terr"></div>
         </div></div></div>`;
       ov.querySelector("#x").onclick = () => ov.innerHTML = "";
-      ov.querySelectorAll("[data-s]").forEach(el => el.onchange = () => {
-        lines[el.dataset.s].mode = el.value; });
-      ov.querySelectorAll("[data-a]").forEach(el => el.onchange = () => {
-        lines[el.dataset.a].amount = Number(el.value) || 0; draw(); });
-      ov.querySelectorAll("[data-x]").forEach(el => el.onclick = () => {
-        lines.splice(el.dataset.x, 1); draw(); });
-      ov.querySelector("#addLine").onclick = () => {
-        lines.push({ mode: "Mobile Money", amount: 0 }); draw(); };
-      ov.querySelectorAll("[data-q]").forEach(el => el.onclick = () => {
-        const v = el.dataset.q === "exact" ? total : Number(el.dataset.q);
-        lines[0].amount = v; draw(); });
+      if (!charged) {
+        ov.querySelectorAll("[data-s]").forEach(el => el.onchange = () => {
+          lines[el.dataset.s].mode = el.value; });
+        ov.querySelectorAll("[data-a]").forEach(el => el.onchange = () => {
+          lines[el.dataset.a].amount = Number(el.value) || 0; draw(); });
+        ov.querySelectorAll("[data-x]").forEach(el => el.onclick = () => {
+          lines.splice(el.dataset.x, 1); draw(); });
+        ov.querySelector("#addLine").onclick = () => {
+          lines.push({ mode: "Mobile Money", amount: 0 }); draw(); };
+        ov.querySelectorAll("[data-q]").forEach(el => el.onclick = () => {
+          const v = el.dataset.q === "exact" ? total : Number(el.dataset.q);
+          lines[0].amount = v; draw(); });
+      }
       ov.querySelector("#ok").onclick = async () => {
         const r = await api("atl_pos.api.bill", { action: "settle",
           payload: JSON.stringify({ invoice: SEL.name,
             tenders: lines.filter(l => Number(l.amount) > 0) }) });
         if (!r.ok) { ov.querySelector("#terr").textContent = r.error; return; }
-        window.open(printUrl(SEL.name), "_blank");
+        window.open(pdfUrl(SEL.name), "_blank");
         ov.innerHTML = ""; SEL = null;
         refresh();
       };
@@ -865,15 +917,22 @@ frappe.ready(function () {
 
   function chargeOverlay() {
     const ov = root.querySelector("#ovl");
-    ov.innerHTML = `<div class="ovl"><div class="card" style="width:400px">
-      <div class="ch"><span>Charge to Raybow room</span>
+    const charged = SEL.custom_charge_to_room;
+    ov.innerHTML = `<div class="ovl"><div class="card" id="atl-card-charge" style="width:400px">
+      <div class="ch"><span>${charged ? "Room charge" : "Charge to Raybow room"}</span>
         <button id="x">×</button></div>
       <div class="tform">
+        ${charged ? `<div style="font-size:12px;color:#7c8a80">
+          Currently charged to Raybow Room <b>${esc(SEL.custom_raybow_room || "")}</b>.
+          Change the room or revert this bill to a normal walk-in bill.</div>` : ""}
         <div class="trow"><input id="cg" class="lt"
-          placeholder="Guest name (optional)"></div>
+          placeholder="Guest name (optional)"
+          value="${esc(SEL.custom_guest_name || "")}"></div>
         <div class="trow"><input id="cr" class="lt"
-          placeholder="Raybow room no" inputmode="numeric"></div>
-        <button class="abtn solid wide" id="go">CHARGE</button>
+          placeholder="Raybow room no" inputmode="numeric"
+          value="${esc(SEL.custom_raybow_room || "")}"></div>
+        <button class="abtn solid wide" id="go">${charged ? "UPDATE ROOM" : "CHARGE"}</button>
+        ${charged ? `<button class="abtn wide" id="revert">REVERT TO NORMAL BILL</button>` : ""}
         <div class="msg err" id="cerr"></div>
       </div></div></div>`;
     ov.querySelector("#x").onclick = () => ov.innerHTML = "";
@@ -886,13 +945,21 @@ frappe.ready(function () {
       ov.innerHTML = ""; await refresh();
       SEL = findBill(SEL.name); PAGE = "tables"; render();
     };
+    const rv = ov.querySelector("#revert");
+    if (rv) rv.onclick = async () => {
+      const r = await api("atl_pos.api.bill", { action: "uncharge_room",
+        payload: JSON.stringify({ invoice: SEL.name }) });
+      if (!r.ok) { ov.querySelector("#cerr").textContent = r.error; return; }
+      ov.innerHTML = ""; await refresh();
+      SEL = findBill(SEL.name); PAGE = "tables"; render();
+    };
   }
 
   function transferOverlay() {
     const ov = root.querySelector("#ovl");
     const opts = (STATE.tables || []).map(t =>
       `<option>${t.name}</option>`).join("");
-    ov.innerHTML = `<div class="ovl"><div class="card" style="width:360px">
+    ov.innerHTML = `<div class="ovl"><div class="card" id="atl-card-transfer" style="width:360px">
       <div class="ch"><span>Transfer table</span><button id="x">×</button></div>
       <div class="tform"><div class="trow">
         <select id="tt" style="flex:1">${opts}</select></div>
@@ -911,7 +978,7 @@ frappe.ready(function () {
   function shiftOverlay() {
     const ov = root.querySelector("#ovl");
     if (!ov) return;
-    ov.innerHTML = `<div class="ovl"><div class="card" style="width:380px">
+    ov.innerHTML = `<div class="ovl"><div class="card" id="atl-card-shift" style="width:380px">
       <div class="ch"><span>Open shift</span><button id="x">×</button></div>
       <div class="tform">
         <div style="font-size:12px;color:#7c8a80">Count the drawer and enter
@@ -934,10 +1001,41 @@ frappe.ready(function () {
     };
   }
 
-  refresh();
-  setInterval(() => {
+  function updateStrip() {
+    const set = (id, v) => { const e = root.querySelector(id);
+      if (e) e.textContent = v; };
+    set("#atl-strip-today-val", fmt(STATS.today_revenue));
+    set("#atl-strip-openbills-val", (STATS.open_bills ?? "–"));
+    set("#atl-strip-folio-val", fmt(STATS.folio_balance));
+    if (STATS.my_shift) set("#atl-strip-float-val",
+                            fmt(STATS.my_shift.cash_float));
+  }
+  // Non-destructive auto-refresh: only when viewing the floor with nothing
+  // selected and no overlay open, so a cashier mid-selection is never wiped.
+  // Otherwise cashiers use the Reload button. 45s to stay light on Frappe Cloud.
+  async function autoTick() {
     const ovl = root.querySelector("#ovl");
-    if (PAGE === "tables" && (!ovl || !ovl.innerHTML)) refresh();
-  }, 25000);
+    if (PAGE !== "tables") return;
+    if (ovl && ovl.innerHTML) return;
+    if (SEL) return;
+    const [st, sg] = await Promise.all([
+      api("atl_pos.api.kiosk", { action: "tables_status" }),
+      api("atl_pos.api.bill", { action: "stats" })]);
+    if (st.ok) STATE = st;
+    if (sg.ok) STATS = sg;
+    if (PAGE === "tables" && !SEL &&
+        !(root.querySelector("#ovl") || {}).innerHTML) {
+      updateStrip();
+      drawGrid();
+    }
+  }
+
+  refresh();
+  document.addEventListener("mousemove", e => {
+    LASTX = e.clientX; LASTY = e.clientY; }, true);
+  window.addEventListener("scroll", hideTip, true);
+  document.addEventListener("pointerdown", e => {
+    if (TT && !TT.contains(e.target)) hideTip(); }, true);
+  setInterval(autoTick, 45000);
 })();
 });

@@ -1,8 +1,7 @@
 # Copyright (c) 2026, Agyeiwaa's Table Limited
 # Whitelisted POS API for the ATL console. Ported from the proven server-script
-# logic (RestrictedPython) into a normal Frappe app module. v0.0.2 adds the
-# wallmount cashier gate, the zero-payment row on drafts, the four-mode shift,
-# richer stats, and the Auditor void workflow.
+# logic into a normal Frappe app module. v0.0.3 adds invoice_printed on settle
+# (clears URY's print-before-submit block) and the uncharge_room action.
 import json
 import frappe
 from frappe.utils import flt, today, now
@@ -565,6 +564,21 @@ def bill(action=None, payload=None, **kw):
             return {"ok": 1, "invoice": inv,
                 "room": room_no, "guest": guest}
 
+    elif action == "uncharge_room":
+        frappe.flags.atl_bill_ops = 1
+        p = json.loads(payload or "{}")
+        inv = p.get("invoice")
+        d = frappe.db.get_value("POS Invoice", inv, "docstatus")
+        if d != 0:
+            return _fail("Only open (draft) bills can be changed")
+        else:
+            frappe.db.set_value("POS Invoice", inv,
+                {"customer": "Walk-in Customer",
+                 "customer_name": "Walk-in Customer",
+                 "custom_charge_to_room": 0,
+                 "custom_raybow_room": ""})
+            return {"ok": 1, "invoice": inv}
+
     elif action == "request_void":
         p = json.loads(payload or "{}")
         inv, rowid = p.get("invoice"), p.get("row")
@@ -717,6 +731,7 @@ def bill(action=None, payload=None, **kw):
                 inv.base_paid_amount = paid
                 inv.change_amount = change if change > 0 else 0
                 inv.base_change_amount = inv.change_amount
+                inv.invoice_printed = 1
                 inv.save(ignore_permissions=True)
                 inv.submit()
                 return {"ok": 1, "invoice": inv.name,
