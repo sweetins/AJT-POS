@@ -1,6 +1,8 @@
 # Copyright (c) 2026, Agyeiwaa's Table Limited
-# Whitelisted POS API for the ATL console. Ported from the proven, battle-tested
-# server-script logic (RestrictedPython) into a normal Frappe app module.
+# Whitelisted POS API for the ATL console. Ported from the proven server-script
+# logic (RestrictedPython) into a normal Frappe app module. v0.0.2 adds the
+# wallmount cashier gate, the zero-payment row on drafts, the four-mode shift,
+# richer stats, and the Auditor void workflow.
 import json
 import frappe
 from frappe.utils import flt, today, now
@@ -29,6 +31,29 @@ def is_cashier(user):
     return bool(frappe.db.get_value("Has Role",
         {"parent": user, "role": ["in", ["URY Cashier", "URY Manager"]],
          "parenttype": "User"}, "name"))
+
+def kiosk_room(user):
+    if not frappe.db.get_value("Has Role",
+            {"parent": user, "role": "ATL Kiosk", "parenttype": "User"},
+            "name"):
+        return None
+    return frappe.db.get_value("URY User",
+        {"parent": "RIT Branch", "user": user}, "room")
+
+def room_cashier_open(room):
+    users = [r.user for r in frappe.db.get_all("URY User",
+        filters={"parent": "RIT Branch", "room": room}, fields=["user"])]
+    cashiers = []
+    for u in users:
+        if frappe.db.get_value("Has Role",
+                {"parent": u, "role": "URY Cashier", "parenttype": "User"},
+                "name"):
+            cashiers.append(u)
+    if not cashiers:
+        return None
+    return frappe.db.get_value("POS Opening Entry",
+        {"user": ["in", cashiers], "status": "Open", "docstatus": 1,
+         "posting_date": frappe.utils.today()}, "name")
 
 def menu_map():
     rows = frappe.db.get_all("URY Menu Item",
@@ -94,11 +119,16 @@ def kiosk(action=None, payload=None, **kw):
 
 
     if action == "auth":
-        w = waiter_by_pin(kw.get("pin") or "")
-        if w:
-            return {"ok": 1, "waiter": w.employee_name}
+        room = kiosk_room(frappe.session.user)
+        if room and not room_cashier_open(room):
+            return _fail("No cashier has opened a shift for " + room +
+                     " yet. Ask the cashier to open first.")
         else:
-            return _fail("Unknown PIN")
+            w = waiter_by_pin(kw.get("pin") or "")
+            if w:
+                return {"ok": 1, "waiter": w.employee_name}
+            else:
+                return _fail("Unknown PIN")
 
     elif action == "menu":
         rows = frappe.db.get_all("URY Menu Item",
@@ -195,7 +225,12 @@ def kiosk(action=None, payload=None, **kw):
         payload = json.loads(payload or "{}")
         pin = (payload.get("pin") or "").strip()
         waiter = None
+        gate = None
         if pin:
+            room = kiosk_room(frappe.session.user)
+            if room and not room_cashier_open(room):
+                gate = ("No cashier has opened a shift for " + room +
+                        " yet. Ask the cashier to open first.")
             w = waiter_by_pin(pin)
             if w:
                 waiter = w.employee_name
@@ -209,7 +244,9 @@ def kiosk(action=None, payload=None, **kw):
                 waiter = frappe.db.get_value("Employee",
                     {"user_id": frappe.session.user}, "employee_name") or \
                     frappe.session.user
-        if not waiter:
+        if gate:
+            return _fail(gate)
+        elif not waiter:
             return _fail("Unknown PIN")
         else:
             table = payload.get("table")
@@ -252,6 +289,7 @@ def kiosk(action=None, payload=None, **kw):
                         "restaurant_table": table, "order_type": order_type,
                         "waiter": waiter,
                         "taxes_and_charges": "ATL Inclusive Taxes - ATL",
+                        "payments": [{"mode_of_payment": "Cash", "amount": 0}],
                         "items": rows})
                     inv.insert(ignore_permissions=True)
                     kot_rows = [r for r in rows if r["item_code"] != "ATL-SV01"]
@@ -342,7 +380,7 @@ user = frappe.session.user
 
 @frappe.whitelist()
 def bill(action=None, payload=None, **kw):
-    """Cashier operations, shift, settlement, stats dispatcher."""
+    """Cashier operations, shift, settlement, voids, stats dispatcher."""
     kw['payload'] = payload
     user = frappe.session.user
 
@@ -363,7 +401,13 @@ def bill(action=None, payload=None, **kw):
         rows = frappe.db.get_all("POS Invoice Item", filters={"parent": inv},
             fields=["name", "item_code", "item_name", "qty", "rate", "amount"],
             order_by="idx")
-        return {"ok": 1, "items": rows}
+        voids = {}
+        for v in frappe.db.get_all("ATL Void Request",
+                filters={"invoice": inv, "consumed": 0, "docstatus": ["<", 2]},
+                fields=["name", "item_row", "docstatus"]):
+            voids[v.item_row] = {"request": v.name,
+                "state": "approved" if v.docstatus == 1 else "pending"}
+        return {"ok": 1, "items": rows, "voids": voids}
 
     elif action == "split_bill":
         frappe.flags.atl_bill_ops = 1
@@ -390,6 +434,7 @@ def bill(action=None, payload=None, **kw):
                 "restaurant_table": target_table, "order_type": src.order_type,
                 "waiter": src.waiter, "taxes_and_charges": src.taxes_and_charges,
                 "custom_split_from": src.name,
+                "payments": [{"mode_of_payment": "Cash", "amount": 0}],
                 "items": [copy_row(it) for it in moved]})
             new.insert(ignore_permissions=True)
             src.items = kept
@@ -520,6 +565,89 @@ def bill(action=None, payload=None, **kw):
             return {"ok": 1, "invoice": inv,
                 "room": room_no, "guest": guest}
 
+    elif action == "request_void":
+        p = json.loads(payload or "{}")
+        inv, rowid = p.get("invoice"), p.get("row")
+        reason = (p.get("reason") or "").strip()
+        row = frappe.db.get_value("POS Invoice Item", rowid,
+            ["item_code", "item_name", "qty", "amount", "parent"], as_dict=True)
+        if not row or row.parent != inv:
+            return _fail("Item row not found on this bill")
+        elif not reason:
+            return _fail("A reason is required")
+        elif frappe.db.get_value("ATL Void Request",
+                {"item_row": rowid, "consumed": 0, "docstatus": ["<", 2]},
+                "name"):
+            return _fail("A void request for this item is already pending or approved")
+        else:
+            d = frappe.get_doc({"doctype": "ATL Void Request",
+                "invoice": inv, "item_row": rowid,
+                "item_code": row.item_code, "item_name": row.item_name,
+                "qty": row.qty, "amount": row.amount,
+                "restaurant_table": frappe.db.get_value("POS Invoice", inv,
+                                                        "restaurant_table"),
+                "reason": reason, "note": (p.get("note") or "").strip(),
+                "requested_by": user,
+                "status": "Pending Auditor's Approval"})
+            d.insert(ignore_permissions=True)
+            return {"ok": 1, "request": d.name,
+                "status": "Pending Auditor's Approval"}
+
+    elif action == "apply_void":
+        frappe.flags.atl_bill_ops = 1
+        p = json.loads(payload or "{}")
+        req = frappe.db.get_value("ATL Void Request", p.get("request") or "x",
+            ["name", "invoice", "item_row", "item_code", "item_name", "qty",
+             "reason", "docstatus", "consumed", "modified_by"], as_dict=True)
+        if not req:
+            return _fail("Void request not found")
+        elif req.docstatus != 1:
+            return _fail("Not yet approved by the Auditor")
+        elif req.consumed:
+            return _fail("This approval was already used")
+        else:
+            inv = frappe.get_doc("POS Invoice", req.invoice)
+            if inv.docstatus != 0:
+                return _fail("Bill is already settled")
+            else:
+                keep = [it for it in inv.items if it.name != req.item_row]
+                if len(keep) == len(inv.items):
+                    return _fail("Item row no longer on the bill")
+                elif not keep:
+                    return _fail("Cannot void the last item; settle or combine instead")
+                else:
+                    inv.items = keep
+                    inv.save(ignore_permissions=True)
+                    total = recalc_totals(inv.name)
+                    frappe.db.set_value("ATL Void Request", req.name,
+                                        "consumed", 1)
+                    units = frappe.db.get_all("URY Production Unit",
+                        filters={"branch": "RIT Branch"},
+                        fields=["name", "production"])
+                    unit = "Kitchen"
+                    grp = frappe.db.get_value("Item", req.item_code, "item_group")
+                    for u in units:
+                        for g in frappe.db.get_all("URY Production Item Groups",
+                                filters={"parent": u.name},
+                                fields=["item_group"]):
+                            if g.item_group == grp:
+                                unit = u.production
+                    kot = frappe.get_doc({"doctype": "URY KOT",
+                        "naming_series": "KOT-ATL-.#####",
+                        "invoice": inv.name,
+                        "restaurant_table": inv.restaurant_table,
+                        "production": unit, "type": "Cancelled",
+                        "pos_profile": "ATL Main POS",
+                        "kot_items": [{"item": req.item_code,
+                            "item_name": req.item_name,
+                            "quantity": req.qty,
+                            "comments": "VOID: " + (req.reason or "") +
+                                " (approved by " + (req.modified_by or "Auditor") +
+                                ")"}]})
+                    kot.insert(ignore_permissions=True)
+                    return {"ok": 1, "invoice": inv.name,
+                        "total": total, "cancel_kot": kot.name}
+
     elif action == "open_shift":
         p = json.loads(payload or "{}")
         existing = frappe.db.get_value("POS Opening Entry",
@@ -529,14 +657,15 @@ def bill(action=None, payload=None, **kw):
             return {"ok": 1, "opening": existing,
                                           "already": 1}
         else:
-            bal = [{"mode_of_payment": "Cash",
-                    "opening_amount": frappe.utils.flt(p.get("cash") or 0)}]
-            if p.get("momo") is not None:
-                bal.append({"mode_of_payment": "Mobile Money",
-                            "opening_amount": frappe.utils.flt(p.get("momo"))})
-            if p.get("card") is not None:
-                bal.append({"mode_of_payment": "Credit Card",
-                            "opening_amount": frappe.utils.flt(p.get("card"))})
+            bal = [
+                {"mode_of_payment": "Cash",
+                 "opening_amount": frappe.utils.flt(p.get("cash") or 0)},
+                {"mode_of_payment": "Mobile Money",
+                 "opening_amount": frappe.utils.flt(p.get("momo") or 0)},
+                {"mode_of_payment": "Credit Card",
+                 "opening_amount": frappe.utils.flt(p.get("card") or 0)},
+                {"mode_of_payment": "Raybow Folio", "opening_amount": 0},
+            ]
             op = frappe.get_doc({"doctype": "POS Opening Entry",
                 "period_start_date": frappe.utils.now(),
                 "posting_date": frappe.utils.today(),
@@ -546,6 +675,7 @@ def bill(action=None, payload=None, **kw):
                 "balance_details": bal})
             op.insert(ignore_permissions=True)
             op.submit()
+            frappe.db.set_value("POS Opening Entry", op.name, "status", "Open")
             return {"ok": 1, "opening": op.name,
                                           "already": 0}
 
@@ -609,7 +739,16 @@ def bill(action=None, payload=None, **kw):
         myshift = frappe.db.get_value("POS Opening Entry",
             {"user": user, "status": "Open", "docstatus": 1,
              "posting_date": today}, ["name", "period_start_date"], as_dict=True)
+        if myshift:
+            myshift["cash_float"] = frappe.db.get_value(
+                "POS Opening Entry Detail",
+                {"parent": myshift.get("name"), "mode_of_payment": "Cash"},
+                "opening_amount") or 0
+        me = frappe.db.get_value("User", user,
+            ["full_name", "user_image"], as_dict=True) or {}
         return {"ok": 1, "today_revenue": rev,
+            "me": {"full_name": me.get("full_name") or user,
+                   "image": me.get("user_image")},
             "open_bills": frappe.db.count("POS Invoice", {"docstatus": 0}),
             "folio_balance": folio,
             "my_shift": myshift}

@@ -16,6 +16,7 @@ def after_install():
     for step in (
         _folio_account, _folio_mode, _profile_payment,
         _charge_fields, _guest_field, _folio_customer,
+        _void_doctype, _void_event_scripts,
         _retire_old_server_scripts,
     ):
         try:
@@ -121,3 +122,169 @@ def _retire_old_server_scripts():
     for name in ("ATL Guard Item Removal", "ATL Employee Company Pin"):
         if frappe.db.exists("Server Script", name):
             frappe.db.set_value("Server Script", name, "disabled", 1)
+
+VOID_DOCTYPE = {
+    "doctype": "DocType",
+    "name": "ATL Void Request",
+    "module": "Custom",
+    "custom": 1,
+    "is_submittable": 1,
+    "track_changes": 1,
+    "autoname": "format:ATL-VOID-{#####}",
+    "title_field": "item_name",
+    "sort_field": "modified",
+    "sort_order": "DESC",
+    "fields": [
+        {
+            "fieldname": "invoice",
+            "label": "Bill (POS Invoice)",
+            "fieldtype": "Link",
+            "options": "POS Invoice",
+            "reqd": 1,
+            "in_list_view": 1
+        },
+        {
+            "fieldname": "restaurant_table",
+            "label": "Table",
+            "fieldtype": "Data",
+            "read_only": 1,
+            "in_list_view": 1
+        },
+        {
+            "fieldname": "item_row",
+            "label": "Item Row ID",
+            "fieldtype": "Data",
+            "reqd": 1,
+            "read_only": 1
+        },
+        {
+            "fieldname": "item_code",
+            "label": "Item",
+            "fieldtype": "Link",
+            "options": "Item",
+            "read_only": 1
+        },
+        {
+            "fieldname": "item_name",
+            "label": "Item Name",
+            "fieldtype": "Data",
+            "read_only": 1,
+            "in_list_view": 1
+        },
+        {
+            "fieldname": "qty",
+            "label": "Qty",
+            "fieldtype": "Float",
+            "read_only": 1
+        },
+        {
+            "fieldname": "amount",
+            "label": "Amount",
+            "fieldtype": "Currency",
+            "read_only": 1,
+            "in_list_view": 1
+        },
+        {
+            "fieldname": "cb1",
+            "label": "",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "reason",
+            "label": "Reason",
+            "fieldtype": "Select",
+            "options": "Customer changed mind\nWrong item entered\nKitchen unable to prepare\nQuality issue\nLong wait\nDuplicate entry\nOther",
+            "reqd": 1,
+            "in_list_view": 1
+        },
+        {
+            "fieldname": "note",
+            "label": "Note",
+            "fieldtype": "Small Text"
+        },
+        {
+            "fieldname": "requested_by",
+            "label": "Requested By",
+            "fieldtype": "Link",
+            "options": "User",
+            "read_only": 1
+        },
+        {
+            "fieldname": "status",
+            "label": "Status",
+            "fieldtype": "Data",
+            "read_only": 1,
+            "allow_on_submit": 1,
+            "default": "Pending Auditor's Approval",
+            "in_list_view": 1
+        },
+        {
+            "fieldname": "consumed",
+            "label": "Consumed",
+            "fieldtype": "Check",
+            "read_only": 1,
+            "allow_on_submit": 1,
+            "default": "0",
+            "hidden": 1
+        }
+    ],
+    "permissions": [
+        {
+            "role": "URY Cashier",
+            "read": 1,
+            "write": 1,
+            "create": 1
+        },
+        {
+            "role": "URY Manager",
+            "read": 1,
+            "write": 1,
+            "create": 1
+        },
+        {
+            "role": "Auditor",
+            "read": 1,
+            "write": 1,
+            "submit": 1,
+            "cancel": 1,
+            "amend": 0
+        },
+        {
+            "role": "System Manager",
+            "read": 1,
+            "write": 1,
+            "create": 1,
+            "submit": 1,
+            "cancel": 1,
+            "delete": 1
+        }
+    ]
+}
+
+VOID_APPROVE = (
+    "doc.status = \"Approved\"\n"
+    "frappe.db.set_value(\"ATL Void Request\", doc.name, "
+    "\"status\", \"Approved\")\n")
+VOID_REJECT = (
+    "doc.status = \"Rejected\"\n"
+    "frappe.db.set_value(\"ATL Void Request\", doc.name, "
+    "\"status\", \"Rejected\")\n")
+
+
+def _void_doctype():
+    if frappe.db.exists("DocType", "ATL Void Request"):
+        return
+    frappe.get_doc(VOID_DOCTYPE).insert(ignore_permissions=True)
+
+
+def _void_event_scripts():
+    for nm, ev, src in (
+            ("ATL Void Approve", "Before Submit", VOID_APPROVE),
+            ("ATL Void Reject", "Before Cancel", VOID_REJECT)):
+        if frappe.db.exists("Server Script", nm):
+            continue
+        frappe.get_doc({"doctype": "Server Script", "name": nm,
+            "script_type": "DocType Event",
+            "reference_doctype": "ATL Void Request",
+            "doctype_event": ev, "script": src,
+            "disabled": 0}).insert(ignore_permissions=True)
