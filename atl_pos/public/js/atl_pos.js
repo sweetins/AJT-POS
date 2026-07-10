@@ -63,33 +63,44 @@ frappe.ready(function () {
   .fnav button .ic{display:block;font-size:17px;line-height:1;margin-bottom:2px}
   .fnav button.on{color:${GREEN};box-shadow:0 -2.5px 0 ${GREEN} inset}
   .credit{padding:3px 0 5px;font-size:9.5px;color:#a89e8c;text-align:center}
-  .apos-tabs{display:flex;gap:8px;padding:10px 14px 0;flex-wrap:wrap}
+  .tpage{height:100%;display:flex;flex-direction:column}
+  .apos-tabs{display:flex;gap:8px;padding:10px 14px 0;flex-wrap:wrap;
+    flex:0 0 auto}
   .apos-tab{padding:8px 16px;border-radius:10px 10px 0 0;cursor:pointer;
     font-weight:700;font-size:12.5px;background:#efe9de;color:#6b6355}
   .apos-tab.on{background:#fff;color:${GREEN};box-shadow:0 -2px 0 ${GREEN} inset;
     background:${CREAM}}
-  .tbody{display:flex;align-items:stretch}
-  .apos-grid{flex:1;padding:12px;display:grid;gap:10px;align-content:start;
+  .tbody{display:flex;align-items:stretch;flex:1 1 auto;min-height:0}
+  .apos-grid{flex:1;min-width:0;padding:12px;display:grid;gap:10px;
+    align-content:start;grid-auto-rows:auto;overflow-y:auto;overflow-x:hidden;
     grid-template-columns:repeat(auto-fill,minmax(126px,1fr))}
-  .tcard{border-radius:12px;padding:10px;min-height:84px;cursor:pointer;
+  .tcard{border-radius:12px;padding:10px;min-height:84px;height:auto;
+    cursor:pointer;overflow:visible;
     border:1.5px dashed #d8d0c2;background:${CREAM};position:relative}
-  .tcard .tn{font-weight:800;font-size:15px}
+  /* the time pill is absolute at top-right; keep the table name clear of it */
+  .tcard .tn{font-weight:800;font-size:15px;padding-right:46px}
   .tcard .seat{font-size:10px;color:#a89e8c;font-style:italic;margin-top:14px}
   .tcard.occ{border:1.5px solid #dfe8e2;border-left:5px solid ${GREEN};
     background:#fff;box-shadow:0 1px 3px rgba(20,51,31,.08)}
   .tcard.occ .amt{font-weight:800;color:${GREEN};font-size:13.5px;margin-top:2px}
-  .tcard .w{font-size:10.5px;color:#7c8a80}
+  /* waiter is a full name, but URY's validate_invoice falls back to
+     modified_by, i.e. a 35-char email with no spaces. Without anywhere-break
+     that token cannot wrap, so it overflows the 126px column instead of
+     growing the card. This is the whole of the v0.0.4 "fixed card" bug. */
+  .tcard .w{font-size:10.5px;color:#7c8a80;line-height:1.3;
+    white-space:normal;overflow-wrap:anywhere;word-break:break-word}
   .tcard .mins{position:absolute;top:8px;right:8px;font-size:10px;
     background:#eef5f0;color:${GREEN};border-radius:9px;padding:2px 7px;
     font-weight:700}
   .tcard .mins.hot{background:#fbf0dd;color:${AMBER}}
-  .tcard .tag{font-size:10px;color:#8a6d3b;font-weight:700}
+  .tcard .tag{font-size:10px;color:#8a6d3b;font-weight:700;
+    white-space:normal;overflow-wrap:anywhere}
   .apos-panel{width:372px;border-left:1px solid #eee6d9;display:flex;
-    flex-direction:column;background:#fff}
+    flex-direction:column;background:#fff;min-height:0}
   .apos-panel .ph{padding:11px 14px;border-bottom:1px solid #f0eade}
   .apos-panel .ph .t{font-weight:800;font-size:16.5px}
   .apos-panel .ph .s{font-size:11.5px;color:#7c8a80}
-  .apos-items{padding:4px 14px}
+  .apos-items{padding:4px 14px;flex:1 1 auto;min-height:0;overflow:auto}
   .irow{display:flex;align-items:flex-start;gap:7px;padding:7px 0;
     border-bottom:1px dashed #efe8da;font-size:13px}
   .irow input[type=checkbox]{accent-color:${GREEN};width:15px;height:15px;
@@ -156,11 +167,29 @@ frappe.ready(function () {
     border-radius:9px;padding:9px 12px;font-size:13px}
   .mhead select{border:1.5px solid #e0d8c8;border-radius:9px;padding:9px;
     font-size:12.5px;max-width:180px}
+  /* v0.0.4 made .crumbs itself the scroller, so Back and the breadcrumb
+     scrolled out of view with the chips, and overflow-x:auto forced
+     overflow-y to compute to auto, which drew the stray scrollbar and
+     clipped the chip borders. Pin the left half, scroll only the chips. */
   .crumbs{display:flex;align-items:center;gap:8px;padding:8px 12px;
-    border-bottom:1px solid #efe8da;flex-wrap:wrap}
+    border-bottom:1px solid #efe8da;flex:0 0 auto;min-width:0}
+  .cfixed{flex:0 0 auto;display:flex;align-items:center;gap:8px;
+    white-space:nowrap}
+  .chipscroll{flex:1 1 auto;min-width:0;display:flex;align-items:center;
+    gap:8px;padding:3px 0;
+    overflow-x:auto;overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;
+    scrollbar-width:none;-ms-overflow-style:none}
+  .chipscroll::-webkit-scrollbar{display:none}
+  .chipscroll>*{flex:0 0 auto}
+  /* fade the right edge only while there is more to reach */
+  .chipscroll.more{-webkit-mask-image:linear-gradient(90deg,#000 0,
+    #000 calc(100% - 22px),transparent 100%);
+    mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 22px),
+    transparent 100%)}
   .chipbtn{border:1.5px solid ${GREEN};background:#fff;color:${GREEN};
     border-radius:18px;padding:7px 14px;font-weight:800;font-size:12px;
-    cursor:pointer}
+    cursor:pointer;white-space:nowrap}
   .chipbtn.on{background:${GREEN};color:#fff}
   .mpage{height:100%;display:flex;flex-direction:column}
   .mbody{flex:1 1 auto;min-height:0;display:flex;align-items:stretch}
@@ -273,11 +302,19 @@ frappe.ready(function () {
   }
   // Downloadable PDF (works before a printer is set up). Opening the URL
   // streams a PDF the cashier can save or print from the browser.
-  const pdfUrl = (n, fmt) =>
-    `/api/method/frappe.utils.print_format.download_pdf?doctype=POS%20Invoice` +
+  const pdfUrl = (n, fmt, doctype) =>
+    `/api/method/frappe.utils.print_format.download_pdf?doctype=` +
+    `${encodeURIComponent(doctype || "POS Invoice")}` +
     `&name=${encodeURIComponent(n)}` +
     `&format=${encodeURIComponent(fmt || "ATL Thermal Receipt")}` +
     `&no_letterhead=1`;
+  // open a PDF in a way downloads/tabs are not popup-blocked
+  function openPdf(url) {
+    const a = document.createElement("a");
+    a.href = url; a.target = "_blank"; a.rel = "noopener";
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  const kotPdf = name => openPdf(pdfUrl(name, "ATL KOT", "URY KOT"));
 
   /* ═══ shell ═══ */
   function render() {
@@ -357,8 +394,9 @@ frappe.ready(function () {
     const m = root.querySelector("#main");
     m.innerHTML = `<div id="pg"></div><div id="ovl"></div>`;
     const pg = root.querySelector("#pg");
-    if (PAGE === "menu") { m.style.overflow = "hidden"; pg.style.height = "100%"; }
-    else { m.style.overflow = "auto"; pg.style.height = ""; }
+    if (PAGE === "menu" || PAGE === "tables") {
+      m.style.overflow = "hidden"; pg.style.height = "100%";
+    } else { m.style.overflow = "auto"; pg.style.height = ""; }
     if (PAGE === "tables") drawTables();
     else if (PAGE === "menu") drawMenuPage();
     else drawCart();
@@ -368,12 +406,14 @@ frappe.ready(function () {
   function drawTables() {
     const pg = root.querySelector("#pg");
     pg.innerHTML = `
+      <div class="tpage">
       <div class="apos-tabs">${ROOMS.map(r =>
         `<div id="atl-room-${r.replace(/\s+/g, "-")}" class="apos-tab ${r === ROOM ? "on" : ""}" data-room="${r}">${r}</div>`)
         .join("")}</div>
       <div class="tbody">
         <div class="apos-grid" id="grid"></div>
         <div class="apos-panel" id="panel" style="display:none"></div>
+      </div>
       </div>`;
     pg.querySelectorAll(".apos-tab").forEach(el => el.onclick = () => {
       ROOM = el.dataset.room; SEL = null; drawTables(); });
@@ -552,7 +592,7 @@ frappe.ready(function () {
     p.querySelector("#addMore").onclick = () => {
       PENDING = []; PAGE = "menu"; render(); };
     p.querySelector("#preRc").onclick = () =>
-      window.open(pdfUrl(SEL.name), "_blank");
+      openPdf(pdfUrl(SEL.name, "ATL Pre-Receipt"));
     p.querySelector("#xfer").onclick = transferOverlay;
     p.querySelector("#chg").onclick = chargeOverlay;
     p.querySelector("#tender").onclick = () => tenderOverlay(total, charged);
@@ -654,11 +694,15 @@ frappe.ready(function () {
           ${PHOTOS ? `background:${GREEN};color:#fff` : ""}">📷</button>
       </div>
       <div class="crumbs" id="atl-crumbs">
-        ${(main || sub || q) ? `<button class="abtn" id="up"
-           style="padding:6px 12px">‹ Back</button>` : ""}
-        <span style="font-size:11.5px;color:#8a8272;font-weight:700">${crumb}</span>
-        ${chips.map(c => `<button id="atl-cat-${esc(c).replace(/[^A-Za-z0-9]+/g, "-")}" class="chipbtn ${(sub || main) === c ? "on" : ""}"
-          data-c="${esc(c)}">${label(c)}</button>`).join("")}
+        <div class="cfixed">
+          ${(main || sub || q) ? `<button class="abtn" id="up"
+             style="padding:6px 12px">‹ Back</button>` : ""}
+          <span style="font-size:11.5px;color:#8a8272;font-weight:700">${crumb}</span>
+        </div>
+        <div class="chipscroll" id="atl-chipscroll">
+          ${chips.map(c => `<button id="atl-cat-${esc(c).replace(/[^A-Za-z0-9]+/g, "-")}" class="chipbtn ${(sub || main) === c ? "on" : ""}"
+            data-c="${esc(c)}">${label(c)}</button>`).join("")}
+        </div>
       </div>
       <div class="mbody" id="atl-mbody">
         <div class="mitems" id="atl-mitems" style="grid-template-columns:repeat(auto-fill,
@@ -726,9 +770,26 @@ frappe.ready(function () {
       pg.querySelectorAll(".chipbtn").forEach(el => el.onclick = () => {
         const c = el.dataset.c; q = "";
         if (!main) { main = c; sub = null; }
-        else if (!sub) sub = c;
+        else { sub = c; }
         draw();
       });
+      const sc = pg.querySelector("#atl-chipscroll");
+      if (sc) {
+        // a desktop mouse has no horizontal wheel; map vertical onto it
+        sc.addEventListener("wheel", e => {
+          if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+          if (sc.scrollWidth <= sc.clientWidth) return;
+          sc.scrollLeft += e.deltaY; e.preventDefault();
+        }, { passive: false });
+        const fade = () => sc.classList.toggle("more",
+          sc.scrollWidth - sc.clientWidth - sc.scrollLeft > 4);
+        sc.addEventListener("scroll", fade, { passive: true });
+        // keep the chosen chip in view rather than parked off-screen
+        const on = sc.querySelector(".chipbtn.on");
+        if (on) sc.scrollLeft = Math.max(0,
+          on.offsetLeft - (sc.clientWidth - on.offsetWidth) / 2);
+        fade();
+      }
       pg.querySelectorAll(".mi").forEach(el => el.onclick = () => {
         const it = MENU.items.find(x => x.item === el.dataset.i);
         const ex = PENDING.find(x => x.item === it.item && !x.note);
@@ -765,6 +826,7 @@ frappe.ready(function () {
           payload: JSON.stringify({ invoice: SEL.name, items, route }) });
       }
       PENDING = [];
+      if (r.ok && r.kots && r.kots.length) r.kots.forEach(k => kotPdf(k.kot));
       await refresh();
       if (r.ok) {
         SEL = findBill(r.invoice) || SEL;
@@ -874,7 +936,7 @@ frappe.ready(function () {
             ${(!charged && lines.length > 1) ? `<button class="abtn" data-x="${ix}"
               style="padding:8px 12px">−</button>` : ""}
           </div>`).join("")}
-          ${charged ? "" : `<div class="tctl">
+          ${charged ? "" : `<div style="text-align:left">
             <button class="abtn" id="addLine" style="padding:8px 14px">
               + split tender</button></div>
           <div class="qcash" id="atl-qcash">${[10, 20, 50, 100, 200].map(v =>
@@ -929,7 +991,7 @@ frappe.ready(function () {
           placeholder="Guest name (optional)"
           value="${esc(SEL.custom_guest_name || "")}"></div>
         <div class="trow"><input id="cr" class="lt"
-          placeholder="Raybow room no" inputmode="numeric"
+          placeholder="Raybow Room No." inputmode="numeric"
           value="${esc(SEL.custom_raybow_room || "")}"></div>
         <button class="abtn solid wide" id="go">${charged ? "UPDATE ROOM" : "CHARGE"}</button>
         ${charged ? `<button class="abtn wide" id="revert">REVERT TO NORMAL BILL</button>` : ""}

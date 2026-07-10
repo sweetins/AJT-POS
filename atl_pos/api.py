@@ -1,7 +1,7 @@
 # Copyright (c) 2026, Agyeiwaa's Table Limited
-# Whitelisted POS API for the ATL console. Ported from the proven server-script
-# logic into a normal Frappe app module. v0.0.3 adds invoice_printed on settle
-# (clears URY's print-before-submit block) and the uncharge_room action.
+# Whitelisted POS API for the ATL console. Generated from the proven server-script
+# logic. v0.0.4: ATL Cafe routing + cafe-cashier KOT suppression, invoice_printed
+# on settle, uncharge_room, and void-create without the removed status field.
 import json
 import frappe
 from frappe.utils import flt, today, now
@@ -63,7 +63,12 @@ def menu_map():
         m[r.item] = r
     return m
 
-def cut_kots(inv_doc, sent_rows, order_type, route=None):
+def is_cafe_cashier(user):
+    return bool(frappe.db.get_value("Has Role",
+        {"parent": user, "role": "ATL Cafe Cashier", "parenttype": "User"},
+        "name"))
+
+def cut_kots(inv_doc, sent_rows, order_type, route=None, suppress_cafe=False):
     units = frappe.db.get_all("URY Production Unit",
         filters={"branch": "RIT Branch"}, fields=["name", "production"])
     routing = {}
@@ -73,7 +78,7 @@ def cut_kots(inv_doc, sent_rows, order_type, route=None):
             routing[g.item_group] = u.production
     grouped = {}
     for r in sent_rows:
-        if route in ("Kitchen", "Bar"):
+        if route in ("Kitchen", "Bar", "ATL Cafe"):
             unit = route
         else:
             grp = frappe.db.get_value("Item", r["item_code"], "item_group")
@@ -82,6 +87,8 @@ def cut_kots(inv_doc, sent_rows, order_type, route=None):
     made = []
     prefix = "TAKE AWAY. " if order_type == "Take Away" else ""
     for unit, rows in grouped.items():
+        if suppress_cafe and unit == "ATL Cafe":
+            continue
         kot = frappe.get_doc({"doctype": "URY KOT",
             "naming_series": "KOT-ATL-.#####",
             "invoice": inv_doc.name, "restaurant_table": inv_doc.restaurant_table,
@@ -146,7 +153,7 @@ def kiosk(action=None, payload=None, **kw):
         for r in rows:
             r["item_group"] = groups.get(r.item)
             r["image"] = images.get(r.item)
-        mains = ["ATL Food", "ATL Drinks", "ATL Services"]
+        mains = ["ATL Food", "ATL Drinks", "ATL Cafe", "ATL Services"]
         tree = {}
         for m in mains:
             subs = frappe.db.get_all("Item Group",
@@ -292,7 +299,8 @@ def kiosk(action=None, payload=None, **kw):
                         "items": rows})
                     inv.insert(ignore_permissions=True)
                     kot_rows = [r for r in rows if r["item_code"] != "ATL-SV01"]
-                    kots = cut_kots(inv, kot_rows, order_type, payload.get("route"))
+                    kots = cut_kots(inv, kot_rows, order_type, payload.get("route"),
+                         is_cafe_cashier(frappe.session.user))
                     return {"ok": 1, "invoice": inv.name,
                         "table": table, "waiter": waiter, "total": total,
                         "kots": kots}
@@ -321,7 +329,8 @@ def kiosk(action=None, payload=None, **kw):
                     for r in rows:
                         inv.append("items", dict(r))
                     inv.save(ignore_permissions=True)
-                    kots = cut_kots(inv, rows, inv.order_type, payload.get("route"))
+                    kots = cut_kots(inv, rows, inv.order_type, payload.get("route"),
+                         is_cafe_cashier(frappe.session.user))
                     gt = 0
                     for it in frappe.db.get_all("POS Invoice Item",
                             filters={"parent": inv.name}, fields=["amount"]):
@@ -601,11 +610,9 @@ def bill(action=None, payload=None, **kw):
                 "restaurant_table": frappe.db.get_value("POS Invoice", inv,
                                                         "restaurant_table"),
                 "reason": reason, "note": (p.get("note") or "").strip(),
-                "requested_by": user,
-                "status": "Pending Auditor's Approval"})
+                "requested_by": user})
             d.insert(ignore_permissions=True)
-            return {"ok": 1, "request": d.name,
-                "status": "Pending Auditor's Approval"}
+            return {"ok": 1, "request": d.name}
 
     elif action == "apply_void":
         frappe.flags.atl_bill_ops = 1
