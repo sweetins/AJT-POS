@@ -6,6 +6,11 @@
 frappe.ready(function () {
 (function () {
   const root = document.getElementById("atl-pos-root");
+  window.addEventListener("resize", () => {
+    const p = root.querySelector("#panel"), mn = root.querySelector("#main");
+    if (p && mn && p.style.display !== "none")
+      p.style.maxHeight = mn.clientHeight + "px";
+  });
   const GREEN = "#15855c", DARK = "#12331f", CREAM = "#faf7f1", AMBER = "#b7791f";
   const ROOMS = ["Restaurant Main", "Terrace", "Room Service", "Take Away"];
   const REASONS = ["Customer changed mind", "Wrong item entered",
@@ -63,40 +68,37 @@ frappe.ready(function () {
   .fnav button .ic{display:block;font-size:17px;line-height:1;margin-bottom:2px}
   .fnav button.on{color:${GREEN};box-shadow:0 -2.5px 0 ${GREEN} inset}
   .credit{padding:3px 0 5px;font-size:9.5px;color:#a89e8c;text-align:center}
-  .tpage{height:100%;display:flex;flex-direction:column}
-  .apos-tabs{display:flex;gap:8px;padding:10px 14px 0;flex-wrap:wrap;
-    flex:0 0 auto}
+  .apos-tabs{display:flex;gap:8px;padding:10px 14px 0;flex-wrap:wrap}
   .apos-tab{padding:8px 16px;border-radius:10px 10px 0 0;cursor:pointer;
     font-weight:700;font-size:12.5px;background:#efe9de;color:#6b6355}
   .apos-tab.on{background:#fff;color:${GREEN};box-shadow:0 -2px 0 ${GREEN} inset;
     background:${CREAM}}
-  .tbody{display:flex;align-items:stretch;flex:1 1 auto;min-height:0}
-  .apos-grid{flex:1;min-width:0;padding:12px;display:grid;gap:10px;
-    align-content:start;grid-auto-rows:auto;overflow-y:auto;overflow-x:hidden;
+  .tbody{display:flex;align-items:stretch}
+  .apos-grid{flex:1;padding:12px;display:grid;gap:10px;align-content:start;
     grid-template-columns:repeat(auto-fill,minmax(126px,1fr))}
-  .tcard{border-radius:12px;padding:10px;min-height:84px;height:auto;
-    cursor:pointer;overflow:visible;
+  .tcard{border-radius:12px;padding:10px;min-height:84px;cursor:pointer;
     border:1.5px dashed #d8d0c2;background:${CREAM};position:relative}
-  /* the time pill is absolute at top-right; keep the table name clear of it */
-  .tcard .tn{font-weight:800;font-size:15px;padding-right:46px}
+  .tcard .tn{font-weight:800;font-size:15px}
   .tcard .seat{font-size:10px;color:#a89e8c;font-style:italic;margin-top:14px}
   .tcard.occ{border:1.5px solid #dfe8e2;border-left:5px solid ${GREEN};
     background:#fff;box-shadow:0 1px 3px rgba(20,51,31,.08)}
   .tcard.occ .amt{font-weight:800;color:${GREEN};font-size:13.5px;margin-top:2px}
-  /* waiter is a full name, but URY's validate_invoice falls back to
-     modified_by, i.e. a 35-char email with no spaces. Without anywhere-break
-     that token cannot wrap, so it overflows the 126px column instead of
-     growing the card. This is the whole of the v0.0.4 "fixed card" bug. */
-  .tcard .w{font-size:10.5px;color:#7c8a80;line-height:1.3;
-    white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+  .tcard .w{font-size:10.5px;color:#7c8a80}
   .tcard .mins{position:absolute;top:8px;right:8px;font-size:10px;
     background:#eef5f0;color:${GREEN};border-radius:9px;padding:2px 7px;
     font-weight:700}
   .tcard .mins.hot{background:#fbf0dd;color:${AMBER}}
-  .tcard .tag{font-size:10px;color:#8a6d3b;font-weight:700;
-    white-space:normal;overflow-wrap:anywhere}
+  .tcard .tag{font-size:10px;color:#8a6d3b;font-weight:700}
+  /* v0.0.6: pinned panel, v4 scroll model. #main scrolls the grid as in
+     0.0.3; the panel rides sticky at the top of the scrollport instead of the
+     grid being caged in a fixed-height scroller (the 0.0.4/0.0.5 approach,
+     which packed table cards down to min-height and pushed the room tag out).
+     align-self:flex-start defeats .tbody's stretch so sticky can engage.
+     max-height is synced to #main's viewport in drawPanel so the item list
+     scrolls internally and TENDER stays reachable. */
   .apos-panel{width:372px;border-left:1px solid #eee6d9;display:flex;
-    flex-direction:column;background:#fff;min-height:0}
+    flex-direction:column;background:#fff;min-height:0;
+    position:sticky;top:0;align-self:flex-start}
   .apos-panel .ph{padding:11px 14px;border-bottom:1px solid #f0eade}
   .apos-panel .ph .t{font-weight:800;font-size:16.5px}
   .apos-panel .ph .s{font-size:11.5px;color:#7c8a80}
@@ -406,14 +408,12 @@ frappe.ready(function () {
   function drawTables() {
     const pg = root.querySelector("#pg");
     pg.innerHTML = `
-      <div class="tpage">
       <div class="apos-tabs">${ROOMS.map(r =>
         `<div id="atl-room-${r.replace(/\s+/g, "-")}" class="apos-tab ${r === ROOM ? "on" : ""}" data-room="${r}">${r}</div>`)
         .join("")}</div>
       <div class="tbody">
         <div class="apos-grid" id="grid"></div>
         <div class="apos-panel" id="panel" style="display:none"></div>
-      </div>
       </div>`;
     pg.querySelectorAll(".apos-tab").forEach(el => el.onclick = () => {
       ROOM = el.dataset.room; SEL = null; drawTables(); });
@@ -519,6 +519,8 @@ frappe.ready(function () {
     const p = root.querySelector("#panel");
     if (!p) return;
     p.style.display = "flex";
+    const mn = root.querySelector("#main");
+    if (mn) p.style.maxHeight = mn.clientHeight + "px";
     if (SEL && SEL.new_table) {
       p.innerHTML = `<div class="ph"><div class="t">${SEL.new_table}</div>
         <div class="s">New order</div></div>
@@ -735,10 +737,10 @@ frappe.ready(function () {
             <b style="color:${GREEN}">${fmt(PENDING.reduce((s, x) =>
               s + x.rate * x.qty, 0))}</b></div>
           <div style="display:flex;gap:5px;padding:0 10px 6px">
-            ${["", "Kitchen", "Bar"].map(r0 => `<button data-r="${r0}"
+            ${["", "Kitchen", "Bar", "ATL Cafe"].map(r0 => `<button data-r="${r0}"
               class="abtn" style="flex:1;padding:6px 0;font-size:10.5px;
               ${route === r0 ? `background:${GREEN};color:#fff` : ""}">
-              ${r0 || "Auto route"}</button>`).join("")}</div>
+              ${r0 === "ATL Cafe" ? "Cafe" : (r0 || "Auto route")}</button>`).join("")}</div>
           <div style="padding:0 10px 10px">
             <button class="abtn solid wide" id="fire" style="width:100%">
               SEND${pcount ? " · " + pcount + " item(s)" : ""}</button></div>
