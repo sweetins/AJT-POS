@@ -64,6 +64,12 @@ def menu_map():
     return m
 
 def is_cafe_cashier(user):
+    if user == "Administrator":
+        return False
+    if frappe.db.get_value("Has Role",
+            {"parent": user, "role": "System Manager", "parenttype": "User"},
+            "name"):
+        return False
     return bool(frappe.db.get_value("Has Role",
         {"parent": user, "role": "ATL Cafe Cashier", "parenttype": "User"},
         "name"))
@@ -154,6 +160,8 @@ def kiosk(action=None, payload=None, **kw):
             r["item_group"] = groups.get(r.item)
             r["image"] = images.get(r.item)
         mains = ["ATL Food", "ATL Drinks", "ATL Cafe", "ATL Services"]
+        if is_cafe_cashier(frappe.session.user):
+            mains = ["ATL Drinks", "ATL Cafe", "ATL Services"]
         tree = {}
         for m in mains:
             subs = frappe.db.get_all("Item Group",
