@@ -8,8 +8,11 @@ frappe.ready(function () {
   const root = document.getElementById("atl-pos-root");
   window.addEventListener("resize", () => {
     const p = root.querySelector("#panel"), mn = root.querySelector("#main");
-    if (p && mn && p.style.display !== "none")
-      p.style.maxHeight = mn.clientHeight + "px";
+    const tabs = root.querySelector(".apos-tabs");
+    const th = tabs ? tabs.offsetHeight : 0;
+    if (p && mn && p.style.display !== "none") {
+      p.style.top = th + "px";
+      p.style.maxHeight = (mn.clientHeight - th) + "px"; }
   });
   const GREEN = "#15855c", DARK = "#12331f", CREAM = "#faf7f1", AMBER = "#b7791f";
   const ROOMS = ["Restaurant Main", "Terrace", "Room Service", "Take Away"];
@@ -68,7 +71,8 @@ frappe.ready(function () {
   .fnav button .ic{display:block;font-size:17px;line-height:1;margin-bottom:2px}
   .fnav button.on{color:${GREEN};box-shadow:0 -2.5px 0 ${GREEN} inset}
   .credit{padding:3px 0 5px;font-size:9.5px;color:#a89e8c;text-align:center}
-  .apos-tabs{display:flex;gap:8px;padding:10px 14px 0;flex-wrap:wrap}
+  .apos-tabs{display:flex;gap:8px;padding:10px 14px 0;flex-wrap:wrap;
+    position:sticky;top:0;z-index:6;background:#fff}
   .apos-tab{padding:8px 16px;border-radius:10px 10px 0 0;cursor:pointer;
     font-weight:700;font-size:12.5px;background:#efe9de;color:#6b6355}
   .apos-tab.on{background:#fff;color:${GREEN};box-shadow:0 -2px 0 ${GREEN} inset;
@@ -396,7 +400,7 @@ frappe.ready(function () {
     const m = root.querySelector("#main");
     m.innerHTML = `<div id="pg"></div><div id="ovl"></div>`;
     const pg = root.querySelector("#pg");
-    if (PAGE === "menu" || PAGE === "tables") {
+    if (PAGE === "menu") {
       m.style.overflow = "hidden"; pg.style.height = "100%";
     } else { m.style.overflow = "auto"; pg.style.height = ""; }
     if (PAGE === "tables") drawTables();
@@ -520,7 +524,10 @@ frappe.ready(function () {
     if (!p) return;
     p.style.display = "flex";
     const mn = root.querySelector("#main");
-    if (mn) p.style.maxHeight = mn.clientHeight + "px";
+    const tabs = root.querySelector(".apos-tabs");
+    const th = tabs ? tabs.offsetHeight : 0;
+    if (mn) { p.style.top = th + "px";
+      p.style.maxHeight = (mn.clientHeight - th) + "px"; }
     if (SEL && SEL.new_table) {
       p.innerHTML = `<div class="ph"><div class="t">${SEL.new_table}</div>
         <div class="s">New order</div></div>
