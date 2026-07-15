@@ -381,12 +381,35 @@ frappe.ready(function () {
     d.innerHTML = `<div class="uh">${esc(me.full_name || UEMAIL)}
       <div style="font-weight:400;font-size:10.5px;color:#8a8272">
         ${esc(UEMAIL)}</div></div>
+      <button id="ucloseshift">Close Shift</button>
       <button id="ulogout">Log Out</button>`;
     main.style.position = "relative";
     main.appendChild(d);
     d.querySelector("#ulogout").onclick = () => {
       frappe.call({ method: "logout",
         callback: () => { window.location.href = "/login"; } });
+    };
+    d.querySelector("#ucloseshift").onclick = async () => {
+      d.remove();
+      const s = await api("atl_shift_api", { action: "shift_status" });
+      if (!s.ok) {
+        noteOverlay("Close shift", `<div class="msg err">${
+          esc(s.error || "Could not read shift status")}</div>`); return;
+      }
+      // contract: shift == null IS the closed state (an inline close flips the
+      // opening to Closed, so a repeat returns "No open shift to close").
+      if (!s.shift) {
+        noteOverlay("Close shift",
+          `<div style="font-size:12px;color:#7c8a80">No open shift to close.
+           </div>`); return;
+      }
+      const pc = s.pending_close;
+      if (pc && pc.status === "Queued") { queuedOverlay(pc.name); return; }
+      if (pc && pc.status === "Failed") {
+        noteOverlay("Close shift", `<div class="msg err">Consolidation failed
+          for ${esc(pc.name)}.<br>${esc(pc.error_message || "")}</div>`); return;
+      }
+      closeShiftOverlay(s.shift);
     };
     setTimeout(() => {
       document.addEventListener("click", function h(e) {
@@ -1043,6 +1066,168 @@ frappe.ready(function () {
           table: ov.querySelector("#tt").value }) });
       if (!r.ok) { ov.querySelector("#xerr").textContent = r.error; return; }
       ov.innerHTML = ""; SEL = null; refresh();
+    };
+  }
+
+  function noteOverlay(title, html, okText) {
+    const ov = root.querySelector("#ovl");
+    if (!ov) return;
+    ov.innerHTML = `<div class="ovl"><div class="card" style="width:380px">
+      <div class="ch"><span>${esc(title)}</span><button id="x">&times;</button></div>
+      <div class="tform">${html}
+        <button class="abtn solid wide" id="ok">${esc(okText || "OK")}</button>
+      </div></div></div>`;
+    ov.querySelector("#x").onclick = () => { ov.innerHTML = ""; };
+    ov.querySelector("#ok").onclick = () => { ov.innerHTML = ""; refresh(); };
+  }
+
+  // Queued close: erpnext consolidates in a background job (10+ invoices).
+  // Contract: do NOT report a clean close. Poll shift_status until the
+  // pending_close reads Submitted, or Failed with an error_message.
+  function queuedOverlay(name) {
+    const ov = root.querySelector("#ovl");
+    if (!ov) return;
+    ov.innerHTML = `<div class="ovl"><div class="card" style="width:380px">
+      <div class="ch"><span>Closing shift</span></div>
+      <div class="tform">
+        <div style="font-size:12px;color:#7c8a80">Closing entry
+          <b>${esc(name)}</b> was accepted and is consolidating in the
+          background. This is not finished yet.</div>
+        <div class="msg" id="qmsg" style="font-size:12px">Checking&hellip;</div>
+        <button class="abtn wide" id="qx">Close this message</button>
+      </div></div></div>`;
+    ov.querySelector("#qx").onclick = () => { ov.innerHTML = ""; refresh(); };
+    let tries = 0;
+    const tick = async () => {
+      if (!root.querySelector("#qmsg")) return;      // overlay dismissed
+      if (++tries > 20) {
+        const m = root.querySelector("#qmsg");
+        if (m) { m.className = "msg err";
+          m.textContent = "Still consolidating. Check POS Closing Entry " +
+            name + " in the desk."; }
+        return;
+      }
+      const s = await api("atl_shift_api", { action: "shift_status" });
+      const m = root.querySelector("#qmsg");
+      if (!m) return;
+      const pc = s.pending_close;
+      if (s.ok && !s.shift) {                        // shift gone => closed
+        m.className = "msg"; m.textContent = "Shift closed.";
+        setTimeout(() => { const o = root.querySelector("#ovl");
+          if (o) o.innerHTML = ""; refresh(); }, 1200); return;
+      }
+      if (pc && pc.status === "Submitted") {
+        m.className = "msg"; m.textContent = "Shift closed.";
+        setTimeout(() => { const o = root.querySelector("#ovl");
+          if (o) o.innerHTML = ""; refresh(); }, 1200); return;
+      }
+      if (pc && pc.status === "Failed") {
+        m.className = "msg err";
+        m.textContent = "Consolidation failed: " + (pc.error_message || "");
+        return;
+      }
+      setTimeout(tick, 3000);
+    };
+    setTimeout(tick, 2500);
+  }
+
+  function closeResultOverlay(r) {
+    const ov = root.querySelector("#ovl");
+    if (!ov) return;
+    const rows = (r.reconciliation || []).map(x => {
+      const d = Number(x.difference || 0);
+      const col = Math.abs(d) < 0.005 ? "#7c8a80" : (d < 0 ? "#c0392b" : GREEN);
+      return `<div class="trow" style="font-size:12px">
+        <span style="min-width:104px;font-weight:700">
+          ${esc(x.mode_of_payment)}</span>
+        <span style="flex:1;color:#7c8a80">counted
+          ${fmt(x.closing_amount)}</span>
+        <span style="font-weight:700;color:${col}">${
+          d > 0 ? "+" : ""}${d.toFixed(2)}</span></div>`;
+    }).join("");
+    const anyDiff = (r.reconciliation || [])
+      .some(x => Math.abs(Number(x.difference || 0)) >= 0.005);
+    ov.innerHTML = `<div class="ovl"><div class="card" style="width:420px">
+      <div class="ch"><span>Shift closed</span><button id="x">&times;</button></div>
+      <div class="tform">
+        <div style="font-size:12px;color:#7c8a80">
+          <b>${esc(r.closing || "")}</b> submitted.
+          ${Number(r.invoices || 0)} bill(s), ${fmt(r.grand_total)}
+          consolidated.</div>
+        ${rows}
+        ${anyDiff ? `<div class="msg err" style="font-size:11.5px">Drawer does
+          not match expected. The difference is recorded on the closing
+          entry.</div>` : ""}
+        <button class="abtn solid wide" id="ok">DONE</button>
+      </div></div></div>`;
+    ov.querySelector("#x").onclick = () => { ov.innerHTML = ""; refresh(); };
+    ov.querySelector("#ok").onclick = () => { ov.innerHTML = ""; refresh(); };
+  }
+
+  function closeShiftOverlay(shift) {
+    const ov = root.querySelector("#ovl");
+    if (!ov) return;
+    const exp = (shift.expected || []);
+    const rows = exp.map((e, i) => `
+      <div class="trow" style="gap:6px">
+        <span style="min-width:96px;font-weight:700;font-size:12px">
+          ${esc(e.mode_of_payment)}</span>
+        <span style="min-width:82px;font-size:11px;color:#7c8a80">exp
+          ${fmt(e.expected_amount)}</span>
+        <input class="ccount" data-m="${esc(e.mode_of_payment)}"
+          data-e="${Number(e.expected_amount || 0)}" type="number" step="0.01"
+          min="0" value="${Number(e.expected_amount || 0).toFixed(2)}"
+          style="width:88px">
+        <span class="cdiff" data-d="${i}" style="min-width:62px;font-size:11.5px;
+          text-align:right;color:#7c8a80">0.00</span>
+      </div>`).join("");
+    // DECISIONS: a stale shift gets a message and IS opened. Never auto-closed.
+    const staleMsg = shift.stale
+      ? `<div class="msg err" style="font-size:11.5px">This shift was opened
+         ${esc(shift.posting_date || "")} and never closed. Count it and close
+         it before opening today's.</div>` : "";
+    ov.innerHTML = `<div class="ovl"><div class="card" id="atl-card-close"
+      style="width:440px">
+      <div class="ch"><span>Close shift</span><button id="x">&times;</button></div>
+      <div class="tform">
+        ${staleMsg}
+        <div style="font-size:12px;color:#7c8a80">Count the drawer and enter what
+          is actually there for each mode. ${Number(shift.invoices || 0)} bill(s),
+          ${fmt(shift.sales_total)} this shift.</div>
+        ${rows || `<div style="font-size:12px;color:#7c8a80">No payment modes on
+          this shift.</div>`}
+        <button class="abtn solid wide" id="cgo">COUNT &amp; CLOSE</button>
+        <div class="msg err" id="cerr"></div>
+      </div></div></div>`;
+    ov.querySelector("#x").onclick = () => { ov.innerHTML = ""; };
+    const recalc = () => {
+      ov.querySelectorAll(".ccount").forEach((inp, i) => {
+        const d = (Number(inp.value) || 0) - Number(inp.dataset.e || 0);
+        const el = ov.querySelector(`.cdiff[data-d="${i}"]`);
+        if (!el) return;
+        el.textContent = (d > 0 ? "+" : "") + d.toFixed(2);
+        el.style.color = Math.abs(d) < 0.005 ? "#7c8a80"
+          : (d < 0 ? "#c0392b" : GREEN);
+      });
+    };
+    ov.querySelectorAll(".ccount").forEach(inp => inp.oninput = recalc);
+    recalc();
+    ov.querySelector("#cgo").onclick = async () => {
+      const btn = ov.querySelector("#cgo");
+      const counted = {};
+      // send real Mode of Payment names; the contract accepts them and it
+      // avoids guessing the short-key mapping.
+      ov.querySelectorAll(".ccount").forEach(inp => {
+        counted[inp.dataset.m] = Number(inp.value) || 0;
+      });
+      btn.disabled = true; btn.textContent = "CLOSING\u2026";
+      const r = await api("atl_shift_api", { action: "close_shift",
+        payload: JSON.stringify({ counted: counted }) });
+      btn.disabled = false; btn.textContent = "COUNT & CLOSE";
+      if (!r.ok) { ov.querySelector("#cerr").textContent = r.error ||
+        "Close failed"; return; }
+      if (r.queued) { queuedOverlay(r.closing); return; }
+      closeResultOverlay(r);
     };
   }
 
